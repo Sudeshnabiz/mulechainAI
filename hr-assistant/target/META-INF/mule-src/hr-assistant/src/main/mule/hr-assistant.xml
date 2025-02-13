@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:ms-aichain="http://www.mulesoft.org/schema/mule/ms-aichain"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:whisperer="http://www.mulesoft.org/schema/mule/whisperer" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/whisperer http://www.mulesoft.org/schema/mule/whisperer/current/mule-whisperer.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ms-aichain http://www.mulesoft.org/schema/mule/ms-aichain/current/mule-ms-aichain.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<whisperer:config name="MAC_Whisperer_Config" doc:name="MAC Whisperer Config" doc:id="2a1c00f0-413a-49fb-9879-02aaea3b5ea8" apiKey='#["api key"]'/>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="8e1b4b1b-59f7-48c2-b153-9d62ec5cb632">
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<ms-aichain:config name="MuleSoft_AI_Chain_Config" llmType="AZURE_OPENAI" configType="Configuration Json" modelName="gpt-4o-mini" doc:name="MuleSoft AI Chain Config" doc:id="80059399-8656-419f-a964-9e63ea9d59f9" filePath='#[mule.home ++ "/apps/" ++ app.name ++ "/envVars.json"]' maxTokens="4000"/>
+	<file:config name="File_Config" doc:name="File Config" doc:id="44b38850-a74a-4601-b031-b26e869dfb25" >
+		<file:connection workingDir="/Users/sudeshna.biswas/Desktop/AnypointStudio/hr-assistant/src/main/resources" />
+	</file:config>
+	<flow name="Generate_new_knowledge_store" doc:id="cfa15604-2a78-4534-ac1b-3035e909f611" >
+		<http:listener doc:name="Listener" doc:id="53e8765a-3fd9-4ba4-9889-b15dc4e9a836" config-ref="HTTP_Listener_config" path="/generate" />
+		<ms-aichain:embedding-new-store doc:name="Generate new Knowledge Store" doc:id="41a6e316-1cbe-40f6-8981-30dd6b2b2fb2" storeName='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/knowledge.store"]' />
+		<file:write doc:name="tmp file" doc:id="4b716e56-7afa-4c57-bb26-5f24119cef63" path='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' >
+			<file:content ><![CDATA[#[""]]]></file:content>
+		</file:write>
+	</flow>
+	<flow name="Ingest_into_knowledge_store" doc:id="b3dfd7df-b192-462d-afc8-46d160813740" >
+		<http:listener doc:name="Listener" doc:id="e2c17ede-2466-4dda-a919-bf4db5b89e99" config-ref="HTTP_Listener_config" path="/ingest" />
+		<ms-aichain:image-read-scanned-documents doc:name="Read File" doc:id="97ec7f32-4ca2-4a24-9026-16113899ecb7" config-ref="MuleSoft_AI_Chain_Config" filePath='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/static/images/image.pdf"]' >
+			<ms-aichain:data ><![CDATA[#["This is a fake CV. Please just give me all the details that you are able to extract from the image. Do not add any overhead!"]]]></ms-aichain:data>
+		</ms-aichain:image-read-scanned-documents>
+		<ee:transform doc:name="Transform Message" doc:id="423a7a22-6a91-4421-895a-525da95e7c85" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+import * from dw::Runtime
+---
+payload.pages[0].response wait 2200]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ms-aichain:chat-answer-prompt doc:name="Translation to English" doc:id="61fc1a4c-4c4a-4464-8d26-960c7c63a8ad" config-ref="MuleSoft_AI_Chain_Config">
+			<ms-aichain:prompt><![CDATA[#["Excerpt: '" ++ payload ++ ".' Instructions: Respond by translating the text-excerpt into English if the text is in a foreign language. If the text is in English, return the exact same input. Do not add anything else"]]]></ms-aichain:prompt>
+		</ms-aichain:chat-answer-prompt>
+		<file:delete doc:name="old tmp file" doc:id="a2d79a24-cd1a-473a-ba0b-9a304a3aaf91" path='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' />
+		<file:write doc:name="new tmp file" doc:id="345cff6e-67f1-4999-841b-d7859b0a604c" path='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' >
+			<file:content ><![CDATA[#[payload.response]]]></file:content>
+		</file:write>
+		<ms-aichain:embedding-add-document-to-store doc:name="Ingest Knowledge" doc:id="7b657b26-0bbb-41f7-99e7-7d35c61a4521" storeName='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/knowledge.store"]' contextPath='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' maxSegmentSizeInChars="4000" maxOverlapSizeInChars="0" />
+	</flow>
+	<flow name="Speech_to_knowledge_store" doc:id="ba676a45-ccbe-4ce7-85f8-483b9b7366f4">
+		<http:listener doc:name="Listener" doc:id="619abb30-ae71-4d2d-a5b6-835cef2fbce7" config-ref="HTTP_Listener_config" path="/stt" />
+		<ee:transform doc:name="Transform Message" doc:id="6f76232e-d180-44bd-a5ba-408e1b11bc3b" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+import * from dw::Runtime
+---
+payload wait 2200]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<whisperer:speech-to-text doc:name="Speech to text" doc:id="52dd3078-8c18-4469-9763-99601db982f1" config-ref="MAC_Whisperer_Config" finetuningPrompt='#["Please transcribe the voice recording into English text."]' audioFilePath='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/static/speech-to-text/recording.mp3"]' temperature="0.2" />
+		<ee:transform doc:name="Transform Message" doc:id="be9b9f13-5719-45b3-8c3d-219d26770cf4">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload.text]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<file:delete doc:name="old tmp file" doc:id="152fe84b-d804-40ef-a7a4-2daa2080ca2a" path='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' />
+		<file:write doc:name="new tmp file" doc:id="c48dc140-d071-4afd-a269-0f2d5a595c2b" path='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]'/>
+		<ms-aichain:embedding-add-document-to-store doc:name="Ingest Knowledge" doc:id="116e1946-03f3-4b18-8af8-94e39dca0f35" storeName='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/knowledge.store"]' contextPath='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/temp.txt"]' maxSegmentSizeInChars="4000" maxOverlapSizeInChars="0" target="embedding_variable" />
+	</flow>
+	<flow name="hr-assistantFlow" doc:id="626fbee6-bcfd-4b8e-9abb-6403f88d97ed" >
+		<http:listener doc:name="Listener" doc:id="fc20d8ea-b06c-4c04-b72e-b0d3d1e97e24" config-ref="HTTP_Listener_config" path="/chat"/>
+		<ms-aichain:chat-answer-prompt doc:name="Chat answer prompt" doc:id="bfd3ec24-9c35-4508-8cd1-54be7a93f7c9" config-ref="MuleSoft_AI_Chain_Config"/>
+		<file:write doc:name="Write" doc:id="82296699-ae59-458c-b367-e90cd5ea9c70" config-ref="File_Config" path="newraml.raml">
+			<file:content ><![CDATA[#[payload.response]]]></file:content>
+		</file:write>
+	</flow>
+	<flow name="Prompt_with_context" doc:id="5d717695-8f42-47d5-a7ab-aab07ac19d11" >
+		<http:listener doc:name="Listener" doc:id="99f1d33a-3df6-4138-b26c-b9fcff3ec7ea" config-ref="HTTP_Listener_config" path="/question" />
+		<ms-aichain:embedding-get-info-from-store doc:name="Prompt with Contextual Information" doc:id="95e3f24e-1def-4807-a2dc-a301a3fa43ad" config-ref="MuleSoft_AI_Chain_Config" storeName='#["/Users/sudeshna.biswas/Desktop/DemoMuleChain/WT Lausanne/Knowledgestore/knowledge.store"]' getLatest="true" >
+			<ms-aichain:data ><![CDATA[#["Question: " ++ payload.question ++ ". Instructions: Please base your answer on the information that you have in the knowledge store. Do not invent things."]]]></ms-aichain:data>
+		</ms-aichain:embedding-get-info-from-store>
+	</flow>
+</mule>
